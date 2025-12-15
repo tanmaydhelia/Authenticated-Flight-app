@@ -1,119 +1,153 @@
 version: '3.8'
 
 services:
-  # # -----------------------------
-  # # 1. DATABASE SERVICE
-  # # -----------------------------
-  # flight-db:
-  #   image: mysql:8.0
-  #   container_name: flight-db
-  #   environment:
-  #     MYSQL_ROOT_PASSWORD: root
-  #     # Removing MYSQL_DATABASE because we use init.sql now
-  #   ports:
-  #     - "3307:3306"
-  #   volumes:
-  #     - mysql_data:/var/lib/mysql
-  #     # This loads your multiple databases on startup:
-  #     - ./init.sql:/docker-entrypoint-initdb.d/init.sql
-  #   networks:
-  #     - flight-network
-  #   healthcheck:
-  #     test: ["CMD", "mysqladmin" ,"ping", "-h", "localhost"]
-  #     timeout: 10s
-  #     retries: 10
+  # -----------------------------
+  # 1. DATABASE SERVICE
+  # -----------------------------
+  flight-db:
+    image: mysql:8.0
+    container_name: flight-db
+    ports:
+      - "3307:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: 16434
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - flight-network
+    # Removed healthcheck because it was causing issues.
+    # We will use manual sleep in other services instead.
 
   # -----------------------------
-  # 2. EUREKA SERVER (Discovery)
+  # 2. MESSAGE QUEUE (Kafka)
+  # -----------------------------
+  kafka:
+    image: apache/kafka:latest
+    container_name: kafka
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+    networks:
+      - flight-network
+
+
+  # -----------------------------
+  # 4. EUREKA SERVER
   # -----------------------------
   eureka-server:
     build: ./flightapp-service-registry
-    container_name: service-registry  # Hostname is 'service-registry'
+    container_name: service-registry
     ports:
       - "8761:8761"
-    networks:
-      - flight-network
     environment:
       - SPRING_PROFILES_ACTIVE=docker
-      # Force Eureka to use its container name as its hostname
       - EUREKA_INSTANCE_HOSTNAME=service-registry
       - EUREKA_CLIENT_REGISTER_WITH_EUREKA=false
       - EUREKA_CLIENT_FETCH_REGISTRY=false
+    networks:
+      - flight-network
+    entrypoint: ["sh", "-c", "sleep 20 && java -jar app.jar"]
 
-  # # -----------------------------
-  # # 3. AUTH SERVICE (Security)
-  # # -----------------------------
-  # auth-service:
-  #   build: ./flightapp-identity-service
-  #   container_name: identity-service
-  #   ports:
-  #     - "9091:9091"
-  #   environment:
-  #     - SPRING_PROFILES_ACTIVE=docker
-  #     # CONNECTS TO 'userdb' (Created by init.sql)
-  #     - SPRING_DATASOURCE_URL=jdbc:mysql://flight-db:3306/userdb?allowPublicKeyRetrieval=true&useSSL=false
-  #     - SPRING_DATASOURCE_USERNAME=root
-  #     - SPRING_DATASOURCE_PASSWORD=root
-  #     - SPRING_JPA_PROPERTIES_HIBERNATE_DIALECT=org.hibernate.dialect.MySQL8Dialect
-  #     # UPDATED HOSTNAME: Pointing to 'service-registry', not 'eureka-server'
-  #     - EUREKA_CLIENT_SERVICEURL_DEFAULTZONE=http://service-registry:8761/eureka/
-  #   depends_on:
-  #     flight-db:
-  #       condition: service_healthy
-  #     eureka-server:
-  #       condition: service_started
-  #   networks:
-  #     - flight-network
+  # -----------------------------
+  # 5. IDENTITY SERVICE
+  # -----------------------------
+  identity-service:
+    build: ./flightapp-identity-service
+    container_name: identity-service
+    ports:
+      - "9091:9091"
+    environment:
+      - SPRING_PROFILES_ACTIVE=docker
+      - SPRING_DATASOURCE_URL=jdbc:mysql://flight-db:3306/identity_db?createDatabaseIfNotExist=true&useSSL=false&allowPublicKeyRetrieval=true
+      - SPRING_DATASOURCE_PASSWORD=16434
+      - SPRING_APPLICATION_JSON={"eureka":{"client":{"service-url":{"defaultZone":"http://service-registry:8761/eureka/"}}}}
+    depends_on:
+      - flight-db
+      - eureka-server
+    networks:
+      - flight-network
+    # Wait 30s to ensure DB is initialized and Eureka is ready
+    entrypoint: ["sh", "-c", "sleep 30 && java -jar app.jar"]
 
-  # # -----------------------------
-  # # 4. FLIGHT SERVICE (Main App)
-  # # -----------------------------
-  # flight-service:
-  #   build: ./flightapp-flight-service
-  #   container_name: flight-service
-  #   ports:
-  #     - "9080:9080"
-  #   environment:
-  #     - SPRING_PROFILES_ACTIVE=docker
-  #     # CONNECTS TO 'airlinesdb' (Created by init.sql)
-  #     - SPRING_DATASOURCE_URL=jdbc:mysql://flight-db:3306/airlinesdb?allowPublicKeyRetrieval=true&useSSL=false
-  #     - SPRING_DATASOURCE_USERNAME=root
-  #     - SPRING_DATASOURCE_PASSWORD=root
-  #     - SPRING_JPA_PROPERTIES_HIBERNATE_DIALECT=org.hibernate.dialect.MySQL8Dialect
-  #     # UPDATED HOSTNAME
-  #     - EUREKA_CLIENT_SERVICEURL_DEFAULTZONE=http://service-registry:8761/eureka/
-  #   depends_on:
-  #     flight-db:
-  #       condition: service_healthy
-  #     eureka-server:
-  #       condition: service_started
-  #   networks:
-  #     - flight-network  
+  # -----------------------------
+  # 6. FLIGHT SERVICE
+  # -----------------------------
+  flight-service:
+    build: ./flightapp-flight-service
+    container_name: flight-service
+    ports:
+      - "9080:9080"
+    environment:
+      - SPRING_PROFILES_ACTIVE=docker
+      - SPRING_CONFIG_IMPORT=optional:configserver:http://config-server:8888
+      - SPRING_APPLICATION_JSON={"eureka":{"client":{"service-url":{"defaultZone":"http://service-registry:8761/eureka/"}}}}
+      - SPRING_DATASOURCE_URL=jdbc:mysql://flight-db:3306/flight_service_DB?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
+      - SPRING_DATASOURCE_PASSWORD=16434
+      - SPRING_KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+    depends_on:
+      - flight-db
+      - eureka-server
+      - kafka
+    networks:
+      - flight-network
+    # Wait 30s to ensure DB/Kafka/Eureka are ready
+    entrypoint: ["sh", "-c", "sleep 30 && java -jar app.jar"]
 
-  # # -----------------------------
-  # # 4. Booking SERVICE (Main App)
-  # # -----------------------------
-  # booking-service:
-  #   build: ./flightapp-booking-service
-  #   container_name: booking-service
-  #   ports:
-  #     - "9090:9090"
-  #   environment:
-  #     - SPRING_PROFILES_ACTIVE=docker
-  #     # CONNECTS TO 'airlinesdb' (Created by init.sql)
-  #     - SPRING_DATASOURCE_URL=jdbc:mysql://flight-db:3306/bookingsdb?allowPublicKeyRetrieval=true&useSSL=false
-  #     - SPRING_DATASOURCE_USERNAME=root
-  #     - SPRING_DATASOURCE_PASSWORD=root
-  #     - SPRING_JPA_PROPERTIES_HIBERNATE_DIALECT=org.hibernate.dialect.MySQL8Dialect
-  #     # UPDATED HOSTNAME
-  #     - EUREKA_CLIENT_SERVICEURL_DEFAULTZONE=http://service-registry:8761/eureka/
-  #   depends_on:
-  #     flight-db:
-  #       condition: service_healthy
-  #     eureka-server:
-  #       condition: service_started
-  #   networks:
-  #     - flight-network  
+  # -----------------------------
+  # 7. BOOKING SERVICE
+  # -----------------------------
+  booking-service:
+    build: ./flightapp-booking-service
+    container_name: booking-service
+    ports:
+      - "9090:9090"
+    environment:
+      - SPRING_PROFILES_ACTIVE=docker
+      - SPRING_CONFIG_IMPORT=optional:configserver:http://config-server:8888
+      - SPRING_APPLICATION_JSON={"eureka":{"client":{"service-url":{"defaultZone":"http://service-registry:8761/eureka/"}}}}
+      - SPRING_DATASOURCE_URL=jdbc:mysql://flight-db:3306/booking_DB?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
+      - SPRING_DATASOURCE_PASSWORD=16434
+      - SPRING_KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+    depends_on:
+      - flight-db
+      - eureka-server
+      - kafka
+    networks:
+      - flight-network
+    # Wait 30s to ensure DB/Kafka/Eureka are ready
+    entrypoint: ["sh", "-c", "sleep 30 && java -jar app.jar"]
+
+  # -----------------------------
+  # 8. API GATEWAY
+  # -----------------------------
+  api-gateway:
+    build: ./flightapp-api-gateway
+    container_name: api-gateway
+    ports:
+      - "9000:9000"
+    environment:
+      - SPRING_PROFILES_ACTIVE=docker
+      - SPRING_CONFIG_IMPORT=optional:configserver:http://config-server:8888
+      - SPRING_APPLICATION_JSON={"eureka":{"client":{"service-url":{"defaultZone":"http://service-registry:8761/eureka/"}}}}
+    depends_on:
+      - eureka-server
+      - identity-service
+      - flight-service
+      - booking-service
+    networks:
+      - flight-network
+    # Wait 40s (longer than others) so backend services are up before Gateway starts
+    entrypoint: ["sh", "-c", "sleep 40 && java -jar app.jar"]
 
 volumes:
   mysql_data:
