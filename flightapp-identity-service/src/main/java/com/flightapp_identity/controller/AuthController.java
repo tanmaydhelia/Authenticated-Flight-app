@@ -41,11 +41,6 @@ public class AuthController {
 		}
 	}
 	
-	@PostMapping("/google")
-    public String loginWithGoogle(@RequestBody String token) {
-        return authService.loginWithGoogle(token);
-    }
-	
 	@GetMapping("/validate")
 	public String validateToken(@RequestParam String token) {
 		authService.validateToken(token);
