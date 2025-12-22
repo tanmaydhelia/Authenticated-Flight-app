@@ -39,6 +39,23 @@ public class AuthenticationFilter extends AbstractGatewayFilterFactory<Authentic
                 } catch (Exception e) {
                     throw new RuntimeException("Unauthorized Access");
                 }
+                
+                String token = exchange.getRequest().getHeaders().get(HttpHeaders.AUTHORIZATION).get(0).substring(7);
+                try {
+                    jwtUtil.validateToken(token); // Validate expiration/signature
+                    
+                    // RBAC CHECK:
+                    String path = exchange.getRequest().getURI().getPath();
+                    if (path.contains("/api/airline")) { 
+                        String role = jwtUtil.getClaims(token).get("role", String.class);
+                        if (!"ROLE_ADMIN".equals(role)) {
+                            throw new RuntimeException("Forbidden: Admin access required");
+                        }
+                    }
+                } catch (Exception e) {
+                    throw new RuntimeException("Unauthorized Access");
+                }
+                
             }
             return chain.filter(exchange);
     	});
