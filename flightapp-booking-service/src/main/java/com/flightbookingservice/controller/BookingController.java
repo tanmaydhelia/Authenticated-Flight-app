@@ -49,6 +49,12 @@ public class BookingController {
 		return bookingService.getHistoryByEmail(emailId);
 	}
 	
+	@GetMapping("/seats/{flightId}")
+    public List<String> getOccupiedSeats(@PathVariable int flightId) {
+        log.info("GET /api/seats/{} requested", flightId);
+        return bookingService.getOccupiedSeats(flightId);
+    }
+	
 	@DeleteMapping("/cancel/{pnr}")
 	public CancelResponse cancelBooking(@PathVariable String pnr) {
 		log.info("DELETE /api/v1.0/flight/booking/cancel/{}",pnr);
