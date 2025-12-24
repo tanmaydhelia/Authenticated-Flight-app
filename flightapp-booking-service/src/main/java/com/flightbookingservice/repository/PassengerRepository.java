@@ -8,10 +8,14 @@ import org.springframework.data.jpa.repository.Query;
 
 import com.flightbookingservice.entity.Passenger;
 
-public interface PassengerRepository extends JpaRepository<Passenger, Integer>{
-	
-	@Query("select p.seatNumber from Passenger p where p.booking.flightId = :flightId and p.seatNumber in :seatNumbers ")
+public interface PassengerRepository extends JpaRepository<Passenger, Integer> {
+
+
+	@Query("SELECT p.seatNumber FROM Passenger p WHERE p.booking.flightId = :flightId AND p.booking.status = 'BOOKED' AND p.seatNumber IN :seatNumbers ")
 	List<String> findTakenSeatNumbers(int flightId, Collection<String> seatNumbers);
-	
+
+	@Query("SELECT p.seatNumber FROM Passenger p WHERE p.booking.flightId = :flightId and p.booking.status = 'BOOKED'")
+	List<String> findAllOccupiedSeatsByFlightId(int flightId);
+
 	List<Passenger> findByBookingId(int bookingId);
 }
