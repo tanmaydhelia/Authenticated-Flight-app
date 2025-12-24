@@ -15,4 +15,6 @@ public interface BookingService {
 	List<ItineraryDto> getHistoryByEmail(String email);
 	
 	CancelResponse cancelByPnr(String pnr);
+	
+	List<String> getOccupiedSeats(int flightid);
 }

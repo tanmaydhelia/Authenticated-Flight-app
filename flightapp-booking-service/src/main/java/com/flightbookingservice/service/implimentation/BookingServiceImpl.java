@@ -33,6 +33,7 @@ import com.flightbookingservice.exception.ResourceNotFoundException;
 import com.flightbookingservice.exception.SeatNotAvailableException;
 import com.flightbookingservice.feignclient.FlightClient;
 import com.flightbookingservice.repository.ItineraryRepository;
+import com.flightbookingservice.repository.PassengerRepository;
 import com.flightbookingservice.repository.UserRepository;
 import com.flightbookingservice.service.BookingService;
 
@@ -41,6 +42,7 @@ import lombok.extern.slf4j.Slf4j;
 @Service
 @Slf4j
 public class BookingServiceImpl implements BookingService {
+
 	
 	@Autowired
 	private KafkaTemplate<String, BookingCancelledEvent> cancelTemplate;
@@ -52,13 +54,15 @@ public class BookingServiceImpl implements BookingService {
 	private final UserRepository userRepository;
     private final ItineraryRepository itineraryRepository;
     private final FlightClient flightClient; // Replaces FlightRepository
+    private final PassengerRepository passengerRepository;
    
 
     public BookingServiceImpl(UserRepository userRepository, FlightClient flightClient,
-                              ItineraryRepository itineraryRepository) {
+                              ItineraryRepository itineraryRepository, PassengerRepository passengerRepository) {
         this.userRepository = userRepository;
         this.flightClient = flightClient;
         this.itineraryRepository = itineraryRepository;
+        this.passengerRepository = passengerRepository;
     }
 
     @Override
@@ -67,6 +71,18 @@ public class BookingServiceImpl implements BookingService {
         log.info("Booking itinerary for email={} tripType={} outwardFlight={}", req.getEmail(), req.getTripType(), outwardFlightId);
 
         validateBookingReq(req);
+        
+        Set<String> requestedSeatNumbers = new HashSet<>();
+        for(PassengerRequest pr: req.getPassengers()) {
+        	if(!requestedSeatNumbers.add(pr.getSeatNumber())) {
+        		throw new SeatNotAvailableException("Duplicate seat number in your request: " + pr.getSeatNumber());
+        	}
+        }
+        
+        List<String> takenOutward = passengerRepository.findTakenSeatNumbers(outwardFlightId, requestedSeatNumbers);
+        if (!takenOutward.isEmpty()) {
+            throw new SeatNotAvailableException("These seats are already occupied on this flight: " + takenOutward);
+        }
 
         // 1. Fetch Outward Flight Details via Network
         FlightSummaryDto outwardFlight = flightClient.getFlightById(outwardFlightId);
@@ -79,6 +95,11 @@ public class BookingServiceImpl implements BookingService {
                 throw new IllegalArgumentException("Return FlightId required!!!");
             }
             returnFlight = flightClient.getFlightById(req.getReturnFlightId());
+            
+            List<String> takenReturn = passengerRepository.findTakenSeatNumbers(req.getReturnFlightId(), requestedSeatNumbers);
+            if (!takenReturn.isEmpty()) {
+                throw new SeatNotAvailableException("Seats already taken on return flight: " + takenReturn);
+            }
         }
 
         int seats = req.getNumberOfSeats();
@@ -194,57 +215,6 @@ public class BookingServiceImpl implements BookingService {
         log.debug("Found {} itineraries", i.size());
         return i.stream().map(this::toItineraryDto).toList();
     }
-
-//Cancellation by Feign Client using Flight Service    
-//    @Override
-//    @Transactional
-//    public CancelResponse cancelByPnr(String pnr) {
-//        log.info("Attempting Cancel for pnr = {}", pnr);
-//
-//        Itinerary i = itineraryRepository.findByPnr(pnr)
-//                .orElseThrow(() -> new ResourceNotFoundException("Itinerary not found for PNR: " + pnr));
-//
-//        LocalDateTime curr = LocalDateTime.now();
-//
-//        // Validate cancellation policy by fetching Flight info
-//        for (Booking b : i.getBookings()) {
-//            if (b.getStatus() != BookingStatus.BOOKED) {
-//                continue;
-//            }
-//
-//            // Fetch flight details to get current Departure Time
-//            FlightSummaryDto flightDto = flightClient.getFlightById(b.getFlightId());
-//            LocalDateTime deptTime = flightDto.getDepartureTime();
-//
-//            if (curr.plusHours(24).isAfter(deptTime)) {
-//                log.warn("Cancellation not Allowed for pnr={}", pnr);
-//                throw new CancellationNotAllowedException("Cannot Cancel as booking within 24hrs");
-//            }
-//        }
-//
-//        // Process Cancellation
-//        for (Booking b : i.getBookings()) {
-//            if (b.getStatus() == BookingStatus.BOOKED) {
-//                b.setStatus(BookingStatus.CANCELLED);
-//                
-//                int passengerCount = b.getPassengers().size();
-//                
-//                // Release seats via Network Call (+ve value)
-//                flightClient.updateSeats(b.getFlightId(), passengerCount);
-//            }
-//        }
-//
-//        i.setStatus(BookingStatus.CANCELLED);
-//        itineraryRepository.save(i);
-//
-//        log.info("Cancellation Successful for pnr={}!!!", pnr);
-//
-//        CancelResponse cr = new CancelResponse();
-//        cr.setPnr(pnr);
-//        cr.setStatus(BookingStatus.CANCELLED);
-//        cr.setMessage("Booking Cancelled Successfully!!!");
-//        return cr;
-//    }
     
     //Cancellation via Kafka event
     @Override
@@ -282,6 +252,11 @@ public class BookingServiceImpl implements BookingService {
        cr.setStatus(BookingStatus.CANCELLED);
        cr.setMessage("Booking Cancelled Successfully!!!");
        return cr;
+    }
+    
+    @Override
+    public List<String> getOccupiedSeats(int flightId) {
+        return passengerRepository.findAllOccupiedSeatsByFlightId(flightId);
     }
 
     // Updated to accept FlightSummaryDto instead of Flight Entity
