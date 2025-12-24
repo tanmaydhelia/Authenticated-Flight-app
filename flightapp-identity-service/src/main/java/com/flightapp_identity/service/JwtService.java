@@ -20,8 +20,10 @@ public class JwtService {
 		Jwts.parserBuilder().setSigningKey(getSignKey()).build().parseClaimsJws(token);
 	}
 	
-	public String generateToken(String username) {
+	public String generateToken(String username, String role, String email) {
 		Map<String, Object> claims = new HashMap<>();
+		claims.put("role", role);
+		claims.put("email", email);
 		return createToken(claims,username);
 	}
 	
