@@ -1,5 +1,8 @@
 package com.flightapp_identity.service;
 
+import java.util.Collections;
+import java.util.UUID;
+
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -7,8 +10,16 @@ import org.springframework.stereotype.Service;
 import com.flightapp_identity.dto.ChangePasswordRequest;
 import com.flightapp_identity.model.UserCredential;
 import com.flightapp_identity.repository.UserCredentialRepository;
+import com.google.api.client.googleapis.auth.oauth2.GoogleIdToken;
+import com.google.api.client.googleapis.auth.oauth2.GoogleIdTokenVerifier;
+import com.google.api.client.http.javanet.NetHttpTransport;
+import com.google.api.client.json.gson.GsonFactory;
+import com.google.api.client.util.Value;
+
+import lombok.extern.slf4j.Slf4j;
 
 @Service
+@Slf4j
 public class AuthService {
 	
 	@Autowired
@@ -17,6 +28,49 @@ public class AuthService {
     private PasswordEncoder passwordEncoder;
     @Autowired
     private JwtService jwtService;
+    
+    private String googleClientId = "575184160466-1roir0tpclglg6jgee329l32q7svu500.apps.googleusercontent.com";
+    
+    public String loginWithGoogle(String idTokenString) {
+    	log.info("Starting Google Token Validation...");
+        log.info("Using Client ID: {}", googleClientId);
+        log.info("Received Token (prefix): {}...", idTokenString.substring(0, Math.min(idTokenString.length(), 20)));
+    	
+    	try {
+			GoogleIdTokenVerifier verifier = new GoogleIdTokenVerifier.Builder(new NetHttpTransport(), new GsonFactory())
+												.setAudience(Collections.singletonList(googleClientId))
+												.build();
+			
+			GoogleIdToken idToken = verifier.verify(idTokenString);
+			
+			if(idToken != null) {
+				GoogleIdToken.Payload payload = idToken.getPayload();
+				log.info("Token Verified Successfully for email: {}", payload.getEmail());
+
+                String email = payload.getEmail();
+                String name = (String) payload.get("name");
+                
+                UserCredential user = userCredRepo.findByEmail(email).orElseGet(() -> {
+                	log.info("New Google user detected. Registering: {}", email);
+                    UserCredential newUser = new UserCredential();
+                    newUser.setName(name);
+                    newUser.setEmail(email);
+                    newUser.setRole("ROLE_USER");
+                    newUser.setPassword(passwordEncoder.encode(UUID.randomUUID().toString()));
+                    return userCredRepo.save(newUser);
+                });
+                
+                return jwtService.generateToken(user.getName(), user.getRole(), user.getEmail());
+			} else {
+				log.error("GoogleIdTokenVerifier.verify() returned NULL. Check if Client ID matches 'aud' in token.");
+                throw new RuntimeException("Invalid Google Token");
+            }
+			
+		} catch (Exception e) {
+			log.error("Exception during Google verification: {}", e.getMessage(), e);
+			throw new RuntimeException("Google Authentication Failed: " + e.getMessage());
+		}
+    }
     
     public String saveUser(UserCredential creds) {
     	creds.setPassword(passwordEncoder.encode(creds.getPassword()));

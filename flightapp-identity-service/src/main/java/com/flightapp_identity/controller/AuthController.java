@@ -1,5 +1,7 @@
 package com.flightapp_identity.controller;
 
+import java.util.Map;
+
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
@@ -41,6 +43,12 @@ public class AuthController {
 		else {
 			throw new RuntimeException("Invalid Access!!!!!!");
 		}
+	}
+	
+	@PostMapping("/google")
+	public String loginWithGoogle(@RequestBody Map<String, String> request) {
+	    String idToken = request.get("token");
+	    return authService.loginWithGoogle(idToken);
 	}
 	
 	@GetMapping("/validate")

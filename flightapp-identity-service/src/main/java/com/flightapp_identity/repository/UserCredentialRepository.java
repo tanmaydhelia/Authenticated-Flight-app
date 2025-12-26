@@ -8,4 +8,6 @@ import com.flightapp_identity.model.UserCredential;
 
 public interface UserCredentialRepository extends JpaRepository<UserCredential, Integer>{
 	Optional<UserCredential> findByName(String name);
+	
+	Optional<UserCredential> findByEmail(String email);
 }
