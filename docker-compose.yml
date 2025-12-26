@@ -1,9 +1,7 @@
 version: '3.8'
 
 services:
-  # -----------------------------
   # 1. DATABASE SERVICE
-  # -----------------------------
   flight-db:
     image: mysql:8.0
     container_name: flight-db
@@ -16,12 +14,8 @@ services:
       - ./init.sql:/docker-entrypoint-initdb.d/init.sql
     networks:
       - flight-network
-    # Removed healthcheck because it was causing issues.
-    # We will use manual sleep in other services instead.
 
-  # -----------------------------
   # 2. MESSAGE QUEUE (Kafka)
-  # -----------------------------
   kafka:
     image: apache/kafka:latest
     container_name: kafka
@@ -41,9 +35,7 @@ services:
       - flight-network
 
 
-  # -----------------------------
-  # 4. EUREKA SERVER
-  # -----------------------------
+  # 3. EUREKA SERVER
   eureka-server:
     build: ./flightapp-service-registry
     container_name: service-registry
@@ -58,9 +50,7 @@ services:
       - flight-network
     entrypoint: ["sh", "-c", "sleep 20 && java -jar app.jar"]
 
-  # -----------------------------
-  # 5. IDENTITY SERVICE
-  # -----------------------------
+  # 4. IDENTITY SERVICE
   identity-service:
     build: ./flightapp-identity-service
     container_name: identity-service
@@ -76,12 +66,9 @@ services:
       - eureka-server
     networks:
       - flight-network
-    # Wait 30s to ensure DB is initialized and Eureka is ready
     entrypoint: ["sh", "-c", "sleep 30 && java -jar app.jar"]
 
-  # -----------------------------
-  # 6. FLIGHT SERVICE
-  # -----------------------------
+  # 5. FLIGHT SERVICE
   flight-service:
     build: ./flightapp-flight-service
     container_name: flight-service
@@ -100,12 +87,9 @@ services:
       - kafka
     networks:
       - flight-network
-    # Wait 30s to ensure DB/Kafka/Eureka are ready
     entrypoint: ["sh", "-c", "sleep 30 && java -jar app.jar"]
 
-  # -----------------------------
-  # 7. BOOKING SERVICE
-  # -----------------------------
+  # 6. BOOKING SERVICE
   booking-service:
     build: ./flightapp-booking-service
     container_name: booking-service
@@ -124,12 +108,9 @@ services:
       - kafka
     networks:
       - flight-network
-    # Wait 30s to ensure DB/Kafka/Eureka are ready
     entrypoint: ["sh", "-c", "sleep 30 && java -jar app.jar"]
 
-  # -----------------------------
-  # 8. API GATEWAY
-  # -----------------------------
+  # 7. API GATEWAY
   api-gateway:
     build: ./flightapp-api-gateway
     container_name: api-gateway
@@ -146,7 +127,6 @@ services:
       - booking-service
     networks:
       - flight-network
-    # Wait 40s (longer than others) so backend services are up before Gateway starts
     entrypoint: ["sh", "-c", "sleep 40 && java -jar app.jar"]
 
 volumes:
