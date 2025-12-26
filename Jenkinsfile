@@ -5,7 +5,7 @@ pipeline {
         MAVEN_HOME = tool 'Maven'
         PATH = "${MAVEN_HOME}/bin:${env.PATH}"
     }
-    
+
     stages {
         stage('Checkout') {
             steps {
@@ -128,9 +128,6 @@ pipeline {
         always {
             echo 'Archiving build artifacts...'
             archiveArtifacts artifacts: '**/target/*.jar', allowEmptyArchive: true
-            
-            echo 'Publishing test results...'
-            junit '**/target/surefire-reports/*.xml'
         }
     }
 }
