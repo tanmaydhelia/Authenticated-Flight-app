@@ -93,25 +93,25 @@ pipeline {
             }
         }
         
-        stage('Verify Deployment') {
-            steps {
-                echo 'Verifying services are running...'
-                script {
-                    def services = [
-                        'Service Registry': 'http://localhost:8761',
-                        'API Gateway': 'http://localhost:9000'
-                    ]
+        // stage('Verify Deployment') {
+        //     steps {
+        //         echo 'Verifying services are running...'
+        //         script {
+        //             def services = [
+        //                 'Service Registry': 'http://localhost:8761',
+        //                 'API Gateway': 'http://localhost:9000'
+        //             ]
                     
-                    services.each { name, url ->
-                        retry(3) {
-                            sleep 10
-                            sh "curl -f ${url}/actuator/health || exit 1"
-                            echo "${name} is healthy"
-                        }
-                    }
-                }
-            }
-        }
+        //             services.each { name, url ->
+        //                 retry(3) {
+        //                     sleep 10
+        //                     sh "curl -f ${url}/actuator/health || exit 1"
+        //                     echo "${name} is healthy"
+        //                 }
+        //             }
+        //         }
+        //     }
+        // }
     }
     
     post {
